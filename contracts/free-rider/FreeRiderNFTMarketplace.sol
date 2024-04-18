@@ -34,20 +34,23 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
         _token.renounceOwnership();
         for (uint256 i = 0; i < amount; ) {
             _token.safeMint(msg.sender);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
         token = _token;
     }
 
-    function offerMany(uint256[] calldata tokenIds, uint256[] calldata prices) external nonReentrant {
+    function offerMany(
+        uint256[] calldata tokenIds,
+        uint256[] calldata prices
+    ) external nonReentrant {
         uint256 amount = tokenIds.length;
-        if (amount == 0)
-            revert InvalidTokensAmount();
-            
-        if (amount != prices.length)
-            revert InvalidPricesAmount();
+        if (amount == 0) revert InvalidTokensAmount();
 
-        for (uint256 i = 0; i < amount;) {
+        if (amount != prices.length) revert InvalidPricesAmount();
+
+        for (uint256 i = 0; i < amount; ) {
             unchecked {
                 _offerOne(tokenIds[i], prices[i]);
                 ++i;
@@ -58,26 +61,30 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
     function _offerOne(uint256 tokenId, uint256 price) private {
         DamnValuableNFT _token = token; // gas savings
 
-        if (price == 0)
-            revert InvalidPrice();
+        if (price == 0) revert InvalidPrice();
 
         if (msg.sender != _token.ownerOf(tokenId))
             revert CallerNotOwner(tokenId);
 
-        if (_token.getApproved(tokenId) != address(this) && !_token.isApprovedForAll(msg.sender, address(this)))
-            revert InvalidApproval();
+        if (
+            _token.getApproved(tokenId) != address(this) &&
+            !_token.isApprovedForAll(msg.sender, address(this))
+        ) revert InvalidApproval();
 
         offers[tokenId] = price;
 
-        assembly { // gas savings
+        assembly {
+            // gas savings
             sstore(0x02, add(sload(0x02), 0x01))
         }
 
         emit NFTOffered(msg.sender, tokenId, price);
     }
 
-    function buyMany(uint256[] calldata tokenIds) external payable nonReentrant {
-        for (uint256 i = 0; i < tokenIds.length;) {
+    function buyMany(
+        uint256[] calldata tokenIds
+    ) external payable nonReentrant {
+        for (uint256 i = 0; i < tokenIds.length; ) {
             unchecked {
                 _buyOne(tokenIds[i]);
                 ++i;
@@ -87,11 +94,10 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
 
     function _buyOne(uint256 tokenId) private {
         uint256 priceToPay = offers[tokenId];
-        if (priceToPay == 0)
-            revert TokenNotOffered(tokenId);
+        if (priceToPay == 0) revert TokenNotOffered(tokenId);
 
-        if (msg.value < priceToPay)
-            revert InsufficientPayment();
+        // @audit One can purchase 6 NFTs while paying only for 1 because msg.value doesn't change
+        if (msg.value < priceToPay) revert InsufficientPayment();
 
         --offersCount;
 
@@ -100,6 +106,7 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
         _token.safeTransferFrom(_token.ownerOf(tokenId), msg.sender, tokenId);
 
         // pay seller using cached token
+        // @audit ETH is being refunded to the buyer as the owner has changed
         payable(_token.ownerOf(tokenId)).sendValue(priceToPay);
 
         emit NFTBought(msg.sender, tokenId, priceToPay);
